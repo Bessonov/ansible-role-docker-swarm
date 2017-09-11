@@ -1,0 +1,10 @@
+---
+language: python
+
+install:
+  - echo "nothing to do"
+
+script: echo "nope. just for notification"
+
+notifications:
+  webhooks: https://galaxy.ansible.com/api/v1/notifications/

@@ -1,0 +1,51 @@
+# -*- mode: ruby -*-
+# # vi: set ft=ruby :
+
+$num_instances = 3
+$instance_name_prefix = "docker-swarm-test"
+$share_home = false
+$vm_gui = false
+$vm_memory = 512
+$vm_cpus = 1
+
+# Use old vb_xxx config variables when set
+def vm_gui
+	$vb_gui.nil? ? $vm_gui : $vb_gui
+end
+
+def vm_memory
+	$vb_memory.nil? ? $vm_memory : $vb_memory
+end
+
+def vm_cpus
+	$vb_cpus.nil? ? $vm_cpus : $vb_cpus
+end
+
+Vagrant.configure("2") do |config|
+
+	config.vm.box = "bento/ubuntu-16.04"
+
+	(1..$num_instances).each do |index|
+
+		config.vm.define vm_name = "%s-%02d" % [$instance_name_prefix, index] do |config|
+			config.vm.hostname = "swarm-node-%02d" % index
+
+			config.vm.provider :virtualbox do |vb|
+				vb.gui = vm_gui
+				vb.memory = vm_memory
+				vb.cpus = vm_cpus
+			end
+
+			ip = "172.17.10.#{index+100}"
+			config.vm.network :private_network, ip: ip
+
+			# just create invertory and install roles
+			config.vm.provision "ansible" do |ansible|
+				ansible.galaxy_role_file = "requirements.yml"
+
+				ansible.playbook = "empty.yml"
+			end
+		end
+	end
+
+end

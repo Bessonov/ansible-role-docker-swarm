@@ -1,0 +1,19 @@
+
+- name: wait for unknown nodes
+  run_once: true
+  become: true
+  delegate_to: "{{ swarm_cluster_control_manager }}"
+  shell: "docker node ls --format '{% raw %}{{ lower .Status }}{% endraw %}' | grep unknown || echo ''"
+  register: swarm_node_status_unknown_result
+  retries: 5
+  delay: 3
+  until: swarm_node_status_unknown_result.stdout == ""
+  changed_when: false
+
+- name: show current state
+  run_once: true
+  become: true
+  delegate_to: "{{ swarm_cluster_control_manager }}"
+  command: "{% raw %}docker node ls --format '{{ .Hostname }}|{{ lower .Status }}|{{ lower .Availability }}|{{ lower .ManagerStatus }}'{% endraw %}"
+  changed_when: false
+

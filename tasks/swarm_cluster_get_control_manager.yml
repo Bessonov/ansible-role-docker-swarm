@@ -1,0 +1,31 @@
+
+- name: get active managers
+  run_once: true
+  become: true
+  delegate_to: "{{ item }}"
+  shell: docker info | grep "^ Is Manager" | awk '{ print $3; }'
+  with_items: "{{ swarm_cluster_managers }}"
+  register: swarm_node_manager_result
+  changed_when: false
+
+- name: set facts about managers to the nodes
+  run_once: true
+  delegate_to: "{{ item.item }}"
+  delegate_facts: true
+  set_fact:
+    swarm_node_manager: "{{ item.stdout | default(false, true) }}"
+  with_items: "{{ swarm_node_manager_result.results }}"
+  loop_control:
+    label: "{{ item.item }}: Is Manager: {{ swarm_node_manager }}"
+
+- name: select a control manager node
+  run_once: true
+  set_fact:
+    swarm_cluster_control_manager: "{{ item }}"
+  with_items: "{{ swarm_cluster_managers }}"
+  when: hostvars[item].swarm_node_manager
+
+- debug: msg="Manager node{{ ':' }} {{ swarm_cluster_control_manager }}"
+  run_once: true
+  when: swarm_cluster_control_manager is defined
+

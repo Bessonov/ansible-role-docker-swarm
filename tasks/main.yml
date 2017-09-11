@@ -1,0 +1,27 @@
+
+- name: get all cluster nodes
+  set_fact:
+    swarm_cluster_nodes: "{{ ansible_play_hosts | union(groups[swarm_worker_hosts]) | unique }}"
+    swarm_cluster_workers: "{{ groups[swarm_worker_hosts] }}"
+    swarm_cluster_managers: "{{ ansible_play_hosts }}"
+  run_once: true
+
+- include: swarm_cluster_get_control_manager.yml
+
+- block:
+  - include: swarm_cluster_bootstrap.yml
+  - include: swarm_cluster_get_control_manager.yml
+  when: swarm_cluster_control_manager is undefined
+
+- include: swarm_cluster_state.yml
+
+- name: join managers
+  include: swarm_cluster_manage_managers.yml
+
+- include: swarm_cluster_state.yml
+
+- name: join workers
+  include: swarm_cluster_manage_workers.yml
+
+- include: swarm_cluster_wait_for_pending_commands.yml
+

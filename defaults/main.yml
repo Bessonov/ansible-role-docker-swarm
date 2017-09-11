@@ -1,0 +1,9 @@
+
+# set parameters to bootstrap a node
+swarm_cluster_bootstrap_parameters:
+  --advertise-addr: eth0
+
+# example of dynamic query:
+# swarm_cluster_bootstrap_parameter_advertise_addr_query: '"{{ inventory_hostname}}".ansible_enp0s8.ipv4.address'
+# swarm_cluster_bootstrap_parameters:
+#  --advertise-addr: "{{ hostvars | json_query(swarm_cluster_bootstrap_parameter_advertise_addr_query) }}"

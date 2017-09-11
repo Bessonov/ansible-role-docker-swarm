@@ -1,0 +1,141 @@
+- name: reset facts
+  set_fact:
+    swarm_cluster_existing_nodes: []
+
+- name: get swarm mode facts about desired cluster members
+  run_once: true
+  become: true
+  delegate_to: "{{ item }}"
+  shell: docker info | grep '^Swarm:' | awk '{ print $2; }'
+  with_items: "{{ swarm_cluster_nodes }}"
+  register: swarm_mode_result
+  changed_when: false
+
+- name: set facts about swarm mode to the nodes
+  run_once: true
+  delegate_to: "{{ item.item }}"
+  delegate_facts: true
+  set_fact:
+    swarm_node_swarm_mode: "{{ item.stdout }}"
+  with_items: "{{ swarm_mode_result.results }}"
+  loop_control:
+    label: "{{ item.item }}: Swarm Mode: {{ swarm_node_swarm_mode }}"
+
+- name: get management state of active swarm nodes
+  run_once: true
+  become: true
+  delegate_to: "{{ item }}"
+  shell: docker info | grep "^ Is Manager" | awk '{ print $3; }'
+  with_items: "{{ swarm_cluster_nodes }}"
+  when: "hostvars[item].swarm_node_swarm_mode == 'active'"
+  register: swarm_node_manager_result
+  changed_when: false
+
+- name: set facts about managers to the nodes
+  run_once: true
+  delegate_to: "{{ item.item }}"
+  delegate_facts: true
+  set_fact:
+    swarm_node_manager: "{{ item.stdout | default(false, true) }}"
+  with_items: "{{ swarm_node_manager_result.results }}"
+  loop_control:
+    label: "{{ item.item }}: Is Manager: {{ swarm_node_manager }}"
+
+- name: map hostnames to nodes
+  run_once: true
+  set_fact:
+    hostname_to_node: "{{ hostname_to_node | default({}) | combine({hostvars[item].ansible_hostname: item}) }}"
+  with_items: "{{ hostvars }}"
+  when: hostvars[item].ansible_hostname is defined
+  loop_control:
+    label: "{{ hostvars[item].ansible_hostname | default('undefined') }} => {{ item }}"
+
+- include: swarm_cluster_wait_for_pending_commands.yml
+
+- name: collect facts about existing swarm cluster
+  run_once: true
+  become: true
+  delegate_to: "{{ swarm_cluster_control_manager }}"
+  command: "{% raw %}docker node ls --format '{{ .Hostname }}|{{ lower .Status }}|{{ lower .Availability }}|{{ lower .ManagerStatus }}'{% endraw %}"
+  register: swarm_cluster_state_result
+  changed_when: false
+
+- name: store current cluster nodes
+  run_once: true
+  set_fact:
+    swarm_cluster_existing_nodes: "{{ swarm_cluster_existing_nodes + [hostname_to_node[item.split('|')[0]]] }}"
+  with_items: "{{ swarm_cluster_state_result.stdout_lines }}"
+
+- name: set default facts to swarm playbook nodes
+  run_once: true
+  delegate_to: "{{ item }}"
+  delegate_facts: true
+  set_fact:
+    swarm_node_is_ready: false
+    swarm_node_is_worker: false
+    swarm_node_is_drained: false
+    swarm_node_is_manager: false
+  with_items: "{{ swarm_cluster_nodes }}"
+
+- name: set facts to current swarm nodes
+  run_once: true
+  delegate_to: "{{ hostname_to_node[item.split('|')[0]] }}"
+  delegate_facts: true
+  set_fact:
+    swarm_node_status: "{{ item.split('|')[1] }}"
+    swarm_node_availability: "{{ item.split('|')[2] }}"
+    swarm_node_manager_status: "{{ item.split('|')[3] }}"
+    swarm_node_is_ready: "{{ item.split('|')[1] == 'ready' }}"
+    swarm_node_is_worker: "{{ item.split('|')[2] == 'active' }}"
+    swarm_node_is_drained: "{{ item.split('|')[2] == 'drain' }}"
+    swarm_node_is_manager: "{{ item.split('|')[3] in ('leader', 'reachable') }}"
+  with_items: "{{ swarm_cluster_state_result.stdout_lines }}"
+
+- name: set transitions to swarm nodes
+  run_once: true
+  delegate_to: "{{ item }}"
+  delegate_facts: true
+  set_fact:
+    swarm_node_transition_join_manager: "{{ hostvars[item].swarm_node_is_manager == false and item in ansible_play_hosts and item not in swarm_cluster_existing_nodes }}"
+    swarm_node_transition_worker_to_manager: "{{ hostvars[item].swarm_node_is_manager == false and (hostvars[item].swarm_node_is_worker or hostvars[item].swarm_node_is_drained) and item in ansible_play_hosts }}"
+    # demote not only notmanager nodes, but also nodes to remove
+    swarm_node_transition_manager_to_worker: "{{ hostvars[item].swarm_node_is_manager and item not in swarm_cluster_managers }}"
+    # TODO: why drain manager and not worker only?
+    swarm_node_transition_manager_to_drained: "{{ hostvars[item].swarm_node_is_manager and hostvars[item].swarm_node_is_worker and item not in swarm_cluster_workers }}"
+    swarm_node_transition_join_worker: "{{ hostvars[item].swarm_node_is_worker == false and item in swarm_cluster_workers and item not in swarm_cluster_existing_nodes and item not in swarm_cluster_managers }}"
+#?    swarm_node_transition_drained_to_manager:
+    swarm_node_transition_drained_to_worker: "{{ hostvars[item].swarm_node_is_drained and item in swarm_cluster_workers }}"
+    swarm_node_transition_worker_to_drained: "{{ hostvars[item].swarm_node_is_worker and hostvars[item].swarm_node_is_drained == false and item not in swarm_cluster_workers }}"
+    swarm_node_transition_remove_node: "{{ item not in swarm_cluster_nodes }}"
+  with_items: "{{ (swarm_cluster_existing_nodes + swarm_cluster_nodes) | unique }}"
+
+- name: show variables
+  run_once: true
+  delegate_to: "{{ item }}"
+  debug:
+    msg:
+      - "item: {{ item }}"
+      - "hostvars[item].swarm_node_is_manager: {{ hostvars[item].swarm_node_is_manager }}"
+      - "hostvars[item].swarm_node_is_worker: {{ hostvars[item].swarm_node_is_worker }}"
+      - "hostvars[item].swarm_node_is_drained: {{ hostvars[item].swarm_node_is_drained }}"
+      - "item in ansible_play_hosts: {{ item in ansible_play_hosts }}"
+      - "item in swarm_cluster_existing_nodes: {{ item in swarm_cluster_existing_nodes }}"
+      - "item in swarm_cluster_workers: {{ item in swarm_cluster_workers }}"
+      - "item in swarm_cluster_managers: {{ item in swarm_cluster_managers }}"
+      - "item in swarm_cluster_nodes: {{ item in swarm_cluster_nodes }}"
+      - "swarm_node_transition_join_manager: {{ swarm_node_transition_join_manager }}"
+      - "swarm_node_transition_worker_to_manager: {{ swarm_node_transition_worker_to_manager }}"
+      - "swarm_node_transition_manager_to_worker: {{ swarm_node_transition_manager_to_worker }}"
+      - "swarm_node_transition_manager_to_drained: {{ swarm_node_transition_manager_to_drained }}"
+      - "swarm_node_transition_join_worker: {{ swarm_node_transition_join_worker }}"
+      - "swarm_node_transition_drained_to_worker: {{ swarm_node_transition_drained_to_worker }}"
+      - "swarm_node_transition_worker_to_drained: {{ swarm_node_transition_worker_to_drained }}"
+      - "swarm_node_transition_remove_node: {{ swarm_node_transition_remove_node }}"
+  with_items: "{{ (swarm_cluster_existing_nodes + swarm_cluster_nodes) | unique }}"
+
+- name: check for valid nodes state
+  assert:
+    that:
+      - hostvars[item].swarm_node_availability in ('active', 'drain')
+  with_items: "{{ swarm_cluster_existing_nodes }}"
+

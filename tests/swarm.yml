@@ -1,0 +1,14 @@
+
+- hosts: all
+  strategy: free
+  roles:
+    - role: Bessonov.docker
+
+- hosts: managers
+  serial: 1
+  roles:
+    - role: ../..
+      swarm_worker_hosts: workers
+      swarm_cluster_bootstrap_parameters:
+        --advertise-addr: enp0s8
+

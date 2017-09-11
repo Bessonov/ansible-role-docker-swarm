@@ -1,0 +1,10 @@
+
+- name: bootstrap first manager node if needed
+  run_once: true
+  become: true
+  command: >
+    docker swarm init
+    {% for parameter in swarm_cluster_bootstrap_parameters %}
+      {{ parameter }} {{ swarm_cluster_bootstrap_parameters[parameter] }}
+    {% endfor %}
+

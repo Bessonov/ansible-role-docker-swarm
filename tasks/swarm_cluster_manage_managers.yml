@@ -1,0 +1,41 @@
+
+- name: get command for joining managers to the swarm cluster
+  run_once: true
+  become: true
+  delegate_to: "{{ swarm_cluster_control_manager }}"
+  shell: docker swarm join-token manager | grep "docker swarm join"
+  register: swarm_cluster_join_manager_command_result
+  changed_when: false
+
+- name: store swarm cluster join manager command
+  run_once: true
+  set_fact:
+    swarm_cluster_join_manager_command: "{{ swarm_cluster_join_manager_command_result.stdout }}"
+
+- name: join nodes as manager
+  become: true
+  command: "{{ swarm_cluster_join_manager_command }}"
+  when: swarm_node_transition_join_manager
+
+- name: promote workers to managers
+  become: true
+  delegate_to: "{{ swarm_cluster_control_manager }}"
+  command: "docker node promote {{ ansible_hostname }}"
+  when: swarm_node_transition_worker_to_manager
+
+- name: demote managers to workers
+  run_once: true
+  become: true
+  delegate_to: "{{ swarm_cluster_control_manager }}"
+  command: "docker node demote {{ hostvars[item].ansible_hostname }}"
+  with_items: "{{ swarm_cluster_existing_nodes }}"
+  when: hostvars[item].swarm_node_transition_manager_to_worker
+
+- name: drain managers
+  run_once: true
+  become: true
+  delegate_to: "{{ swarm_cluster_control_manager }}"
+  command: "docker node update --availability drain {{ hostvars[item].ansible_hostname }}"
+  with_items: "{{ swarm_cluster_existing_nodes }}"
+  when: hostvars[item].swarm_node_transition_manager_to_drained
+
