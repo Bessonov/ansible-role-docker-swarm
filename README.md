@@ -71,14 +71,13 @@ Playbook:
     # you can use any role for docker installation
     - hosts: managers:workers
       roles:
-        - role: Bessonov.docker
+        - Bessonov.docker
 
     - hosts: managers
       # docker cli doesn't support concurrent access
       serial: 1
       roles:
-        - role: Bessonov.docker-swarm
-          swarm_worker_hosts: workers
+        - { role: Bessonov.docker-swarm, swarm_worker_hosts: workers }
 
           # optional: override default parameters, see `defaults/main.yml`
           swarm_cluster_bootstrap_parameters:
